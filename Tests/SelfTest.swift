@@ -48,6 +48,7 @@ do {
     check(c.hudPosition == "Top Left", "hud_position read")
     check(c.showNowPlaying == false, "bool read")
     check(c.keyPlay == "q", "missing keys default")
+    check(c.showDockIcon == true, "show_dock_icon defaults on for old configs")
 }
 do {
     let url = tempURL()
@@ -57,6 +58,7 @@ do {
     ConfigStore.save(c, to: url)
     let raw = try! String(contentsOf: url, encoding: .utf8)
     check(raw.contains("\"hud_song_timeout\""), "snake_case keys on disk")
+    check(raw.contains("\"show_dock_icon\""), "show_dock_icon persisted")
     check(raw.contains("\"theme\" : \"system\""), "System (Auto) persists")
     check(ConfigStore.load(from: url) == c, "round trip")
 }

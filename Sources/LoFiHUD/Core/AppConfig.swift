@@ -21,6 +21,7 @@ struct AppConfig: Codable, Equatable {
     var enableHardwareKeys: Bool
     var theme: String
     var autostart: Bool
+    var showDockIcon: Bool
 
     static let `default` = AppConfig(
         musicDir: Paths.defaultMusicDir,
@@ -41,7 +42,8 @@ struct AppConfig: Codable, Equatable {
         autopauseDevice: "Disabled",
         enableHardwareKeys: true,
         theme: Themes.systemID,
-        autostart: true
+        autostart: true,
+        showDockIcon: true
     )
 
     enum CodingKeys: String, CodingKey {
@@ -64,6 +66,7 @@ struct AppConfig: Codable, Equatable {
         case enableHardwareKeys = "enable_hardware_keys"
         case theme
         case autostart
+        case showDockIcon = "show_dock_icon"
     }
 
     init(
@@ -71,7 +74,7 @@ struct AppConfig: Codable, Equatable {
         keyShowSong: String, keyIgnore: String, keyVolUp: String, keyVolDown: String,
         volume: Int, showNowPlaying: Bool, showActions: Bool, hudPosition: String,
         hudTimeout: Int, hudSongTimeout: Int, autopauseDevice: String,
-        enableHardwareKeys: Bool, theme: String, autostart: Bool
+        enableHardwareKeys: Bool, theme: String, autostart: Bool, showDockIcon: Bool
     ) {
         self.musicDir = musicDir
         self.modKey = modKey
@@ -92,6 +95,7 @@ struct AppConfig: Codable, Equatable {
         self.enableHardwareKeys = enableHardwareKeys
         self.theme = theme
         self.autostart = autostart
+        self.showDockIcon = showDockIcon
     }
 
     /// Missing or mistyped keys fall back to defaults instead of failing the whole file.
@@ -120,6 +124,7 @@ struct AppConfig: Codable, Equatable {
         enableHardwareKeys = v(.enableHardwareKeys, d.enableHardwareKeys)
         theme = v(.theme, d.theme)
         autostart = v(.autostart, d.autostart)
+        showDockIcon = v(.showDockIcon, d.showDockIcon)
         normalize()
     }
 

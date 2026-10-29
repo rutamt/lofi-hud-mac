@@ -170,6 +170,7 @@ final class AppController {
         ConfigStore.save(config)
 
         LoginItem.sync(enabled: config.autostart)
+        settings.refreshDockIcon()
         _ = player.setVolume(config.volume)
         hotkeys.register(config)
         media.isEnabled = config.enableHardwareKeys

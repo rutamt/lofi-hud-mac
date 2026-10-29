@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Hosts the singleton Settings window. Shows a Dock icon only while open.
+/// Hosts the singleton Settings window. Shows a Dock icon only while open (unless disabled).
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private unowned let app: AppController
     private var window: NSWindow?
@@ -10,7 +10,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     init(app: AppController) { self.app = app }
 
     func open() {
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(app.config.showDockIcon ? .regular : .accessory)
         if let window {
             NSApp.activate()
             window.makeKeyAndOrderFront(nil)
@@ -52,6 +52,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         model = nil
         window = nil
         NSApp.setActivationPolicy(.accessory)
+    }
+
+    /// Apply a changed Dock icon preference while the window is open.
+    func refreshDockIcon() {
+        guard let window else { return }
+        NSApp.setActivationPolicy(app.config.showDockIcon ? .regular : .accessory)
+        // Switching policy can deactivate the app; keep Settings in front.
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
     }
 }
 
@@ -241,6 +250,10 @@ private struct PlaybackTab: View {
         let t = model.theme
         Card(title: "Behavior & System", symbol: "slider.horizontal.3", theme: t) {
             ToggleRow("Start LoFi HUD at login", isOn: $model.autostart, theme: t)
+            ToggleRow(
+                "Show Dock icon while Settings is open",
+                subtitle: "LoFi HUD always lives in the menu bar; this only affects the Dock",
+                isOn: $model.showDockIcon, theme: t)
             ToggleRow("Auto-show Now Playing when the track changes", isOn: $model.showNowPlaying, theme: t)
             ToggleRow("Show volume and play/pause HUD", isOn: $model.showActions, theme: t)
             Row("Auto-Pause Device", theme: t) {

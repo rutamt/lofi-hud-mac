@@ -30,6 +30,7 @@ final class SettingsModel: ObservableObject {
     @Published var hudTimeout: Int
     @Published var hudSongTimeout: Int
     @Published var autostart: Bool
+    @Published var showDockIcon: Bool
     @Published var showNowPlaying: Bool
     @Published var showActions: Bool
     @Published var autopauseDevice: String
@@ -59,6 +60,7 @@ final class SettingsModel: ObservableObject {
         hudTimeout = c.hudTimeout
         hudSongTimeout = c.hudSongTimeout
         autostart = c.autostart
+        showDockIcon = c.showDockIcon
         showNowPlaying = c.showNowPlaying
         showActions = c.showActions
         autopauseDevice = c.autopauseDevice
@@ -154,6 +156,7 @@ final class SettingsModel: ObservableObject {
         c.hudTimeout = hudTimeout
         c.hudSongTimeout = hudSongTimeout
         c.autostart = autostart
+        c.showDockIcon = showDockIcon
         c.showNowPlaying = showNowPlaying
         c.showActions = showActions
         c.autopauseDevice = autopauseDevice
