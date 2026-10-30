@@ -22,6 +22,8 @@
     <string>__VERSION__</string>
     <key>CFBundleVersion</key>
     <string>__BUILD__</string>
+    <key>LoFiHUDGitHubRepo</key>
+    <string>rutamt/lofi-hud-mac</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.music</string>
     <key>LSMinimumSystemVersion</key>

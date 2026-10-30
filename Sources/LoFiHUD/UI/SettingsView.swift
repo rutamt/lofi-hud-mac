@@ -18,7 +18,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
         let model = SettingsModel(app: app)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 740),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.title = "LoFi HUD Settings"
@@ -30,7 +30,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let host = NSHostingView(rootView: SettingsView(model: model))
         host.sizingOptions = [.minSize]
         window.contentView = host
-        window.setContentSize(NSSize(width: 640, height: 720))
+        window.setContentSize(NSSize(width: 640, height: 740))
         window.delegate = self
         if !window.setFrameUsingName("LoFiHUDSettings") { window.center() }
         window.setFrameAutosaveName("LoFiHUDSettings")
@@ -49,6 +49,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         model?.endCapture(resumeHotkeys: true)
+        if app.isPositioningHUD { app.endHUDPositioning() }
         model = nil
         window = nil
         NSApp.setActivationPolicy(.accessory)
@@ -62,6 +63,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
+
+    func libraryChanged() { model?.libraryChanged() }
+    func devicesChanged() { model?.refreshDevices() }
+    func configChangedExternally() { model?.syncFromApp() }
 }
 
 // MARK: - Root view
@@ -109,6 +114,7 @@ struct SettingsView: View {
             }
             .frame(width: 44, height: 44)
             .shadow(color: t.color(t.accent).opacity(0.35), radius: 8, y: 3)
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("LoFi HUD")
@@ -147,6 +153,7 @@ struct SettingsView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
         .padding(4)
@@ -155,23 +162,15 @@ struct SettingsView: View {
     }
 
     private func footer(_ t: Theme) -> some View {
-        VStack(spacing: 10) {
-            Button(action: model.save) {
-                HStack(spacing: 6) {
-                    if model.savedFlash { Image(systemName: "checkmark") }
-                    Text(model.savedFlash ? "Saved!" : "Save & Apply")
-                }
-                .font(.system(size: 14, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .foregroundStyle(model.savedFlash ? Color.white : t.color(t.onAccent))
-                .background(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(model.savedFlash ? Color.green : t.color(t.accent)))
-                .contentShape(Rectangle())
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: model.savedFlash ? "checkmark.circle.fill" : "checkmark.circle")
+                    .foregroundStyle(model.savedFlash ? Color.green : t.color(t.muted))
+                Text(model.savedFlash ? "Saved" : "Changes apply instantly")
             }
-            .buttonStyle(PressableStyle())
-            .keyboardShortcut("s", modifiers: .command)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(t.color(t.fg).opacity(0.8))
+            .accessibilityElement(children: .combine)
 
             HStack(spacing: 6) {
                 Text("LoFi HUD v\(AppInfo.version) • Created by Rutam and Gemini")
@@ -182,15 +181,10 @@ struct SettingsView: View {
             .foregroundStyle(t.color(t.muted))
         }
         .padding(.horizontal, 22)
-        .padding(.top, 12)
-        .padding(.bottom, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
         .background(t.color(t.bg))
-    }
-}
-
-enum AppInfo {
-    static var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0"
     }
 }
 
@@ -205,36 +199,76 @@ private struct AppearanceTab: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
                 ThemeChip(
                     label: Themes.systemLabel,
-                    preview: [Themes.resolve("system_light"), Themes.resolve("harbor_night")],
-                    selected: model.themeID == Themes.systemID, current: t
+                    preview: [Themes.preset(model.draft.autoLightTheme)!, Themes.preset(model.draft.autoDarkTheme)!],
+                    selected: model.draft.theme == Themes.systemID, current: t
                 ) { model.selectTheme(Themes.systemID) }
                 ForEach(Themes.all) { theme in
-                    ThemeChip(label: theme.label, preview: [theme], selected: model.themeID == theme.id, current: t) {
+                    ThemeChip(label: theme.label, preview: [theme], selected: model.draft.theme == theme.id, current: t) {
                         model.selectTheme(theme.id)
                     }
+                }
+            }
+            if model.draft.theme == Themes.systemID {
+                Row("Light Mode Theme", theme: t) {
+                    Picker("Light Mode Theme", selection: $model.draft.autoLightTheme) {
+                        ForEach(Themes.lightThemes) { Text($0.label).tag($0.id) }
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                Row("Dark Mode Theme", theme: t) {
+                    Picker("Dark Mode Theme", selection: $model.draft.autoDarkTheme) {
+                        ForEach(Themes.darkThemes) { Text($0.label).tag($0.id) }
+                    }
+                    .labelsHidden().fixedSize()
+                }
+            }
+            Row("Accent Color", theme: t) {
+                HStack(spacing: 8) {
+                    if model.draft.accentMode == "custom" {
+                        ColorPicker("Custom accent", selection: model.customAccent, supportsOpacity: false)
+                            .labelsHidden()
+                    }
+                    Picker("Accent Color", selection: $model.draft.accentMode) {
+                        Text("Theme").tag("theme")
+                        Text("macOS").tag("system")
+                        Text("Custom").tag("custom")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
                 }
             }
         }
 
         Card(title: "Overlay", symbol: "rectangle.on.rectangle", theme: t) {
             Row("HUD Position", theme: t) {
-                Picker("", selection: $model.hudPosition) {
-                    ForEach(HUDPosition.allCases, id: \.rawValue) { Text($0.rawValue).tag($0.rawValue) }
+                HStack(spacing: 8) {
+                    SecondaryButton("Drag to Place…", symbol: "hand.draw", theme: t, action: model.positionHUD)
+                    Picker("HUD Position", selection: $model.draft.hudPosition) {
+                        ForEach(HUDPosition.allCases, id: \.rawValue) { Text($0.rawValue).tag($0.rawValue) }
+                    }
+                    .labelsHidden().fixedSize()
+                }
+            }
+            Row("Display", theme: t) {
+                Picker("Display", selection: $model.draft.hudDisplay) {
+                    ForEach(model.displayOptions, id: \.tag) { Text($0.label).tag($0.tag) }
                 }
                 .labelsHidden().fixedSize()
             }
             Row("Action HUD Timeout", theme: t) {
-                Picker("", selection: $model.hudTimeout) {
-                    ForEach(model.timeoutOptions(including: model.hudTimeout), id: \.ms) { Text($0.label).tag($0.ms) }
+                Picker("Action HUD Timeout", selection: $model.draft.hudTimeout) {
+                    ForEach(model.timeoutOptions(including: model.draft.hudTimeout), id: \.ms) { Text($0.label).tag($0.ms) }
                 }
                 .labelsHidden().fixedSize()
             }
             Row("Song Info Timeout", theme: t) {
-                Picker("", selection: $model.hudSongTimeout) {
-                    ForEach(model.timeoutOptions(including: model.hudSongTimeout), id: \.ms) { Text($0.label).tag($0.ms) }
+                Picker("Song Info Timeout", selection: $model.draft.hudSongTimeout) {
+                    ForEach(model.timeoutOptions(including: model.draft.hudSongTimeout), id: \.ms) { Text($0.label).tag($0.ms) }
                 }
                 .labelsHidden().fixedSize()
             }
+            ToggleRow("Show song progress on Now Playing", isOn: $model.draft.showSongProgress, theme: t)
             HStack {
                 Spacer()
                 SecondaryButton("Preview HUD", symbol: "eye", theme: t, action: model.previewHUD)
@@ -249,27 +283,66 @@ private struct PlaybackTab: View {
     var body: some View {
         let t = model.theme
         Card(title: "Behavior & System", symbol: "slider.horizontal.3", theme: t) {
-            ToggleRow("Start LoFi HUD at login", isOn: $model.autostart, theme: t)
+            ToggleRow("Start LoFi HUD at login", isOn: $model.draft.autostart, theme: t)
             ToggleRow(
                 "Show Dock icon while Settings is open",
                 subtitle: "LoFi HUD always lives in the menu bar; this only affects the Dock",
-                isOn: $model.showDockIcon, theme: t)
-            ToggleRow("Auto-show Now Playing when the track changes", isOn: $model.showNowPlaying, theme: t)
-            ToggleRow("Show volume and play/pause HUD", isOn: $model.showActions, theme: t)
-            Row("Auto-Pause Device", theme: t) {
-                Picker("", selection: $model.autopauseDevice) {
-                    ForEach(model.deviceOptions, id: \.self) { Text($0).tag($0) }
+                isOn: $model.draft.showDockIcon, theme: t)
+            ToggleRow("Auto-show Now Playing when the track changes", isOn: $model.draft.showNowPlaying, theme: t)
+            ToggleRow("Show volume and play/pause HUD", isOn: $model.draft.showActions, theme: t)
+            Row("Auto-Pause On Disconnect", theme: t) {
+                Picker("Auto-Pause On Disconnect", selection: $model.autopauseSelection) {
+                    ForEach(model.autopauseOptions, id: \.tag) { Text($0.label).tag($0.tag) }
                 }
                 .labelsHidden().fixedSize()
             }
-            Text("Pauses playback when this output device disconnects, e.g. Bluetooth headphones.")
-                .font(.system(size: 11))
-                .foregroundStyle(t.color(t.muted))
+            Caption("Pauses when the output device disconnects, e.g. Bluetooth headphones. "
+                    + "“Whichever Device Is Playing” works with any headphones.", theme: t)
+            HStack {
+                ToggleRow("Check for updates daily", isOn: $model.draft.checkForUpdates, theme: t)
+                SecondaryButton("Check Now", symbol: "arrow.down.circle", theme: t, action: model.checkForUpdates)
+            }
+        }
+
+        Card(title: "Sound", symbol: "waveform", theme: t) {
+            Row("Crossfade", theme: t) {
+                HStack(spacing: 10) {
+                    Slider(value: Binding(
+                        get: { Double(model.draft.crossfade) },
+                        set: { model.draft.crossfade = Int($0.rounded()) }), in: 0...12, step: 1)
+                        .frame(width: 180)
+                        .accessibilityLabel("Crossfade seconds")
+                    Text(model.draft.crossfade == 0 ? "Off (gapless)" : "\(model.draft.crossfade) s")
+                        .font(.system(size: 12, weight: .medium).monospacedDigit())
+                        .foregroundStyle(t.color(t.muted))
+                        .frame(width: 84, alignment: .trailing)
+                }
+            }
+            Row("Ambient Noise", theme: t) {
+                Picker("Ambient Noise", selection: $model.draft.noise) {
+                    ForEach(Noise.Kind.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
+                }
+                .labelsHidden().fixedSize()
+            }
+            if model.draft.noise != Noise.Kind.off.rawValue {
+                Row("Noise Volume", theme: t) {
+                    Slider(value: Binding(
+                        get: { Double(model.draft.noiseVolume) },
+                        set: { model.draft.noiseVolume = Int($0.rounded()) }), in: 0...100)
+                        .frame(width: 180)
+                        .accessibilityLabel("Noise volume")
+                }
+            }
+            ToggleRow(
+                "Favorites only",
+                subtitle: "Shuffle just the songs you’ve favorited (\(model.favoritesCount) so far)",
+                isOn: $model.draft.favoritesOnly, theme: t)
+            Caption("Set a sleep timer from the menu bar icon.", theme: t)
         }
 
         Card(title: "Music Source", symbol: "folder", theme: t) {
             HStack(spacing: 8) {
-                TextField("Music folder", text: $model.musicDir)
+                TextField("Music folder", text: $model.musicDirText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .monospaced))
                     .padding(.horizontal, 10)
@@ -277,7 +350,12 @@ private struct PlaybackTab: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(t.color(t.surface)))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(t.color(t.border)))
                     .foregroundStyle(t.color(t.fg))
-                PrimaryButton("Browse", theme: t, action: model.browse)
+                    .onSubmit(model.applyMusicDir)
+                if model.musicDirEdited {
+                    PrimaryButton("Apply", theme: t, action: model.applyMusicDir)
+                } else {
+                    PrimaryButton("Browse", theme: t, action: model.browse)
+                }
             }
             HStack(spacing: 8) {
                 SecondaryButton("Open Folder", symbol: "folder", theme: t, action: model.openFolder)
@@ -287,9 +365,8 @@ private struct PlaybackTab: View {
                     .font(.system(size: 12, weight: .medium).monospacedDigit())
                     .foregroundStyle(t.color(t.muted))
             }
-            Text("Supports MP3, AAC/M4A, ALAC, FLAC, WAV and AIFF. Removed songs go to a sibling “Ignored_Lofi” folder.")
-                .font(.system(size: 11))
-                .foregroundStyle(t.color(t.muted))
+            Caption("Supports MP3, AAC/M4A, ALAC, FLAC, WAV, AIFF and CAF. New files are picked up automatically. "
+                    + "Removed songs go to a sibling “Ignored_Lofi” folder.", theme: t)
         }
     }
 }
@@ -302,7 +379,8 @@ private struct ControlsTab: View {
         Card(title: "Hotkeys", symbol: "command", theme: t) {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "checkmark.seal.fill").foregroundStyle(Color.green)
-                Text("Hotkeys work system-wide and don’t need Accessibility permission.")
+                Text("Hotkeys work system-wide and don’t need Accessibility permission. "
+                     + "Click a shortcut, then press the new combo.")
                     .foregroundStyle(t.color(t.muted))
             }
             .font(.system(size: 12))
@@ -310,23 +388,29 @@ private struct ControlsTab: View {
             ToggleRow(
                 "Enable hardware media keys",
                 subtitle: "Keyboard media keys, AirPods & Bluetooth headsets, Control Center",
-                isOn: $model.enableHardwareKeys, theme: t)
-
-            Row("Hold Modifier", theme: t) {
-                Picker("", selection: $model.modKey) {
-                    ForEach(SettingsModel.modifiers, id: \.id) { Text($0.label).tag($0.id) }
-                }
-                .labelsHidden().fixedSize()
-            }
+                isOn: $model.draft.enableHardwareKeys, theme: t)
 
             Divider().overlay(t.color(t.border))
 
             ForEach(Hotkeys.Action.displayOrder, id: \.self) { action in
-                Row(action.label, theme: t) {
+                let problem = model.problem(for: action)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(action.label)
+                            .font(.system(size: 13))
+                            .foregroundStyle(t.color(t.fg))
+                        if let problem {
+                            Label(problem, systemImage: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.orange)
+                        }
+                    }
+                    Spacer(minLength: 12)
                     KeyButton(
-                        modifier: Hotkeys.modifierSymbol(model.modKey),
-                        key: model.binds[action] ?? "",
+                        action: action,
+                        combo: model.combo(action),
                         capturing: model.capturing == action,
+                        conflict: problem != nil,
                         theme: t
                     ) {
                         if model.capturing == action {
@@ -338,26 +422,22 @@ private struct ControlsTab: View {
                 }
             }
 
-            if model.capturing != nil {
-                Text("Press the new key. Esc cancels.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(t.color(t.muted))
+            if let hint = model.captureHint {
+                Warning(hint, theme: t)
+            } else if model.capturing != nil {
+                Caption("Press the new combo. Esc cancels.", theme: t)
             }
-            if !model.failedHotkeys.isEmpty {
-                Warning(
-                    "Couldn’t register: \(model.failedHotkeys.map(\.label).joined(separator: ", ")). "
-                        + "The combo is a duplicate or already used by another app.",
-                    theme: t)
-            }
-            if model.cmdShortcutWarning {
-                Warning("⌘ combos like ⌘Q or ⌘C will override those shortcuts in every app.", theme: t)
+            HStack {
+                Caption("Next, previous, show, remove, favorite and volume only act while music is playing.", theme: t)
+                Spacer()
+                SecondaryButton("Reset to Defaults", symbol: "arrow.counterclockwise", theme: t, action: model.resetHotkeys)
             }
         }
     }
 }
 
 extension Hotkeys.Action {
-    static let displayOrder: [Hotkeys.Action] = [.play, .next, .prev, .showSong, .ignore, .volUp, .volDown]
+    static let displayOrder: [Hotkeys.Action] = [.play, .next, .prev, .showSong, .ignore, .favorite, .volUp, .volDown]
 }
 
 // MARK: - Components
@@ -373,6 +453,7 @@ private struct Card<Content: View>: View {
             Label(title, systemImage: symbol)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(theme.color(theme.fg))
+                .accessibilityAddTraits(.isHeader)
             content
         }
         .padding(16)
@@ -405,6 +486,22 @@ private struct Row<Control: View>: View {
             Spacer(minLength: 12)
             control
         }
+    }
+}
+
+private struct Caption: View {
+    let text: String
+    let theme: Theme
+    init(_ text: String, theme: Theme) {
+        self.text = text
+        self.theme = theme
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(theme.color(theme.muted))
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -493,25 +590,29 @@ private struct ThemeChip: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label) theme")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
 private struct KeyButton: View {
-    let modifier: String
-    let key: String
+    let action: Hotkeys.Action
+    let combo: KeyCombo
     let capturing: Bool
+    let conflict: Bool
     let theme: Theme
-    let action: () -> Void
+    let onTap: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button(action: onTap) {
             HStack(spacing: 4) {
                 if capturing {
                     Image(systemName: "record.circle").symbolEffect(.pulse)
-                    Text("Press key…")
+                    Text("Press combo…")
                 } else {
-                    KeyCap(modifier, theme: theme)
-                    KeyCap(KeyCodes.display(key), theme: theme)
+                    ForEach(combo.modifierSymbols, id: \.self) { KeyCap($0, theme: theme) }
+                    KeyCap(KeyCodes.display(combo.key), theme: theme)
                 }
             }
             .font(.system(size: 12, weight: .semibold))
@@ -524,10 +625,24 @@ private struct KeyButton: View {
                     .fill(capturing ? theme.color(theme.danger) : theme.color(theme.surface)))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(theme.color(theme.border), lineWidth: capturing ? 0 : 0.5))
+                    .strokeBorder(conflict ? Color.orange : theme.color(theme.border),
+                                  lineWidth: capturing ? 0 : (conflict ? 1.5 : 0.5)))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
+        .accessibilityLabel("\(action.label) shortcut")
+        .accessibilityValue(capturing ? "Recording, press the new combo" : spoken)
+        .accessibilityHint("Activate to record a new shortcut")
+    }
+
+    private var spoken: String {
+        var parts: [String] = []
+        if combo.modifiers.contains(.control) { parts.append("Control") }
+        if combo.modifiers.contains(.option) { parts.append("Option") }
+        if combo.modifiers.contains(.shift) { parts.append("Shift") }
+        if combo.modifiers.contains(.command) { parts.append("Command") }
+        parts.append(combo.key.count == 1 ? combo.key.uppercased() : combo.key.replacingOccurrences(of: "_", with: " "))
+        return parts.joined(separator: " ")
     }
 }
 
@@ -599,6 +714,7 @@ private struct SecondaryButton: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(theme.color(theme.border), lineWidth: 0.5))
                 .contentShape(Rectangle())
+                .fixedSize()
         }
         .buttonStyle(PressableStyle())
     }

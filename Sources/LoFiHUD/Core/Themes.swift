@@ -12,12 +12,20 @@ struct Theme: Identifiable, Equatable {
     let border: String
     let fg: String
     let muted: String
-    let accent: String
-    let accentHover: String
-    let onAccent: String
+    var accent: String
+    var accentHover: String
+    var onAccent: String
     let danger: String
 
     var colorScheme: ColorScheme { isLight ? .light : .dark }
+
+    /// Replace the accent, deriving a hover shade and a readable foreground.
+    mutating func applyAccent(_ hex: String) {
+        let c = NSColor(hex: hex)
+        accent = c.hexString
+        accentHover = (c.blended(withFraction: 0.18, of: .black) ?? c).hexString
+        onAccent = c.luminance > 0.22 ? "#1a1a1a" : "#ffffff"  // whichever contrasts more
+    }
     func color(_ hex: String) -> Color { Color(nsColor: NSColor(hex: hex)) }
 }
 
@@ -46,6 +54,34 @@ enum Themes {
               bg: "#282828", surface: "#32302f", surfaceAlt: "#3c3836", border: "#504945",
               fg: "#ebdbb2", muted: "#a89984", accent: "#fe8019", accentHover: "#d65d0e",
               onAccent: "#282828", danger: "#fb4934"),
+        Theme(id: "mocha", label: "Catppuccin Mocha", isLight: false,
+              bg: "#1e1e2e", surface: "#181825", surfaceAlt: "#313244", border: "#45475a",
+              fg: "#cdd6f4", muted: "#a6adc8", accent: "#cba6f7", accentHover: "#b4befe",
+              onAccent: "#1e1e2e", danger: "#f38ba8"),
+        Theme(id: "dracula", label: "Dracula", isLight: false,
+              bg: "#282a36", surface: "#21222c", surfaceAlt: "#343746", border: "#44475a",
+              fg: "#f8f8f2", muted: "#9aa5ce", accent: "#ff79c6", accentHover: "#bd93f9",
+              onAccent: "#282a36", danger: "#ff5555"),
+        Theme(id: "one_dark", label: "One Dark", isLight: false,
+              bg: "#282c34", surface: "#21252b", surfaceAlt: "#2c313a", border: "#3e4451",
+              fg: "#dcdfe4", muted: "#8b929e", accent: "#61afef", accentHover: "#528bcc",
+              onAccent: "#1e2127", danger: "#e06c75"),
+        Theme(id: "kanagawa", label: "Kanagawa", isLight: false,
+              bg: "#1f1f28", surface: "#16161d", surfaceAlt: "#2a2a37", border: "#363646",
+              fg: "#dcd7ba", muted: "#938aa9", accent: "#e6c384", accentHover: "#c0a36e",
+              onAccent: "#1f1f28", danger: "#e46876"),
+        Theme(id: "everforest", label: "Everforest", isLight: false,
+              bg: "#2d353b", surface: "#272e33", surfaceAlt: "#343f44", border: "#475258",
+              fg: "#d3c6aa", muted: "#9da9a0", accent: "#a7c080", accentHover: "#83c092",
+              onAccent: "#2d353b", danger: "#e67e80"),
+        Theme(id: "solarized_dark", label: "Solarized Dark", isLight: false,
+              bg: "#002b36", surface: "#073642", surfaceAlt: "#0a404d", border: "#24535e",
+              fg: "#eee8d5", muted: "#93a1a1", accent: "#2aa198", accentHover: "#268bd2",
+              onAccent: "#002b36", danger: "#dc322f"),
+        Theme(id: "solarized_light", label: "Solarized Light", isLight: true,
+              bg: "#fdf6e3", surface: "#fffbee", surfaceAlt: "#eee8d5", border: "#d9d2bc",
+              fg: "#586e75", muted: "#93a1a1", accent: "#268bd2", accentHover: "#2aa198",
+              onAccent: "#ffffff", danger: "#dc322f"),
         Theme(id: "latte", label: "Catppuccin Latte", isLight: true,
               bg: "#eff1f5", surface: "#ffffff", surfaceAlt: "#e6e9ef", border: "#ccd0da",
               fg: "#4c4f69", muted: "#8c8fa1", accent: "#8839ef", accentHover: "#7287fd",
@@ -65,6 +101,9 @@ enum Themes {
         "Hanami": "rose_pine", "Paper": "latte", "Circuit": "tokyo_night",
         "Tokyo Night": "tokyo_night", "Rosé Pine": "rose_pine", "Gruvbox Warm": "gruvbox",
         "Catppuccin Latte": "latte", "System Light": "system_light",
+        "Catppuccin Mocha": "mocha", "Dracula": "dracula", "One Dark": "one_dark",
+        "Kanagawa": "kanagawa", "Everforest": "everforest",
+        "Solarized Dark": "solarized_dark", "Solarized Light": "solarized_light",
         "canopy": "gruvbox", "hanami": "rose_pine", "paper": "latte", "circuit": "tokyo_night",
     ]
 
@@ -80,10 +119,37 @@ enum Themes {
         return legacyNames[value] ?? systemID
     }
 
+    static func isPreset(_ id: String) -> Bool { byID[id] != nil }
+
+    static func preset(_ id: String) -> Theme? { byID[id] }
+
+    static var lightThemes: [Theme] { all.filter(\.isLight) }
+    static var darkThemes: [Theme] { all.filter { !$0.isLight } }
+
+    /// Theme for a stored id using the default System (Auto) pair and no accent override.
     static func resolve(_ value: String?) -> Theme {
+        resolve(value, light: "system_light", dark: "harbor_night")
+    }
+
+    static func resolve(_ value: String?, light: String, dark: String) -> Theme {
         let id = canonicalID(value)
-        if id == systemID { return byID[isSystemDark ? "harbor_night" : "system_light"]! }
+        if id == systemID {
+            return byID[isSystemDark ? dark : light] ?? byID[isSystemDark ? "harbor_night" : "system_light"]!
+        }
         return byID[id]!
+    }
+
+    /// Fully resolved theme for a config: System (Auto) pair and accent override applied.
+    static func resolve(_ c: AppConfig) -> Theme {
+        var theme = resolve(c.theme, light: c.autoLightTheme, dark: c.autoDarkTheme)
+        let accent: String?
+        switch c.accentMode {
+        case "system": accent = NSColor.controlAccentColor.hexString
+        case "custom": accent = c.customAccent
+        default: accent = nil
+        }
+        if let accent { theme.applyAccent(accent) }
+        return theme
     }
 
     static func label(for id: String) -> String {
@@ -92,6 +158,20 @@ enum Themes {
 }
 
 extension NSColor {
+    var hexString: String {
+        guard let c = usingColorSpace(.sRGB) else { return "#4a90e2" }
+        let r = Int(round(c.redComponent * 255)), g = Int(round(c.greenComponent * 255))
+        let b = Int(round(c.blueComponent * 255))
+        return String(format: "#%02x%02x%02x", r, g, b)
+    }
+
+    /// Relative luminance (WCAG).
+    var luminance: CGFloat {
+        guard let c = usingColorSpace(.sRGB) else { return 0.5 }
+        func lin(_ v: CGFloat) -> CGFloat { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        return 0.2126 * lin(c.redComponent) + 0.7152 * lin(c.greenComponent) + 0.0722 * lin(c.blueComponent)
+    }
+
     convenience init(hex: String, alpha: CGFloat = 1) {
         var s = hex.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("#") { s.removeFirst() }

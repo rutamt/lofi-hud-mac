@@ -9,7 +9,7 @@ import Carbon.HIToolbox
 /// using the user's system key-repeat timing.
 final class Hotkeys {
     enum Action: UInt32, CaseIterable {
-        case volUp = 1, volDown, play, prev, next, showSong, ignore
+        case volUp = 1, volDown, play, prev, next, showSong, ignore, favorite
 
         var repeats: Bool { self == .volUp || self == .volDown }
 
@@ -20,6 +20,7 @@ final class Hotkeys {
             case .prev: return "Previous Track"
             case .showSong: return "Show Song Name"
             case .ignore: return "Remove/Ignore Song"
+            case .favorite: return "Favorite Song"
             case .volUp: return "Volume Up"
             case .volDown: return "Volume Down"
             }
@@ -35,6 +36,7 @@ final class Hotkeys {
     private var repeatTimer: Timer?
     private var repeatingAction: Action?
     private var lastConfig: AppConfig?
+    private var isSuspended = false
     private static let signature: OSType = 0x4C4F_4649  // 'LOFI'
 
     init() {
@@ -56,45 +58,60 @@ final class Hotkeys {
         case .prev: return config.keyPrev
         case .showSong: return config.keyShowSong
         case .ignore: return config.keyIgnore
+        case .favorite: return config.keyFavorite
         case .volUp: return config.keyVolUp
         case .volDown: return config.keyVolDown
         }
     }
 
-    static func carbonModifiers(_ mod: String) -> UInt32 {
-        switch mod.lowercased() {
-        case "cmd", "command": return UInt32(cmdKey)
-        case "ctrl", "control": return UInt32(controlKey)
-        case "shift": return UInt32(shiftKey)
-        default: return UInt32(optionKey)
+    static func combo(_ action: Action, in config: AppConfig) -> KeyCombo {
+        KeyCombo(binding(action, in: config), defaultModifier: config.modKey)
+    }
+
+    static func setBinding(_ action: Action, _ combo: KeyCombo, in config: inout AppConfig) {
+        let value = combo.stringValue
+        switch action {
+        case .play: config.keyPlay = value
+        case .next: config.keyNext = value
+        case .prev: config.keyPrev = value
+        case .showSong: config.keyShowSong = value
+        case .ignore: config.keyIgnore = value
+        case .favorite: config.keyFavorite = value
+        case .volUp: config.keyVolUp = value
+        case .volDown: config.keyVolDown = value
         }
     }
 
-    static func modifierSymbol(_ mod: String) -> String {
-        switch mod.lowercased() {
-        case "cmd", "command": return "⌘"
-        case "ctrl", "control": return "⌃"
-        case "shift": return "⇧"
-        default: return "⌥"
-        }
+    /// Whether another app (or macOS) already holds this combo. Call while our own are suspended.
+    static func isAvailable(_ combo: KeyCombo) -> Bool {
+        guard let code = KeyCodes.keyCode(for: combo.key) else { return false }
+        var ref: EventHotKeyRef?
+        let id = EventHotKeyID(signature: 0x4C4F_4654, id: 999)  // 'LOFT' probe
+        let status = RegisterEventHotKey(
+            UInt32(code), combo.carbonModifiers, id, GetApplicationEventTarget(),
+            OptionBits(kEventHotKeyExclusive), &ref)
+        if let ref { UnregisterEventHotKey(ref) }
+        return status == noErr
     }
 
     /// Register every binding. Earlier actions in `Action.allCases` win on conflicts,
     /// matching the original matcher's precedence.
     func register(_ config: AppConfig) {
         unregisterAll()
+        isSuspended = false
         lastConfig = config
         failed = []
-        let mods = Self.carbonModifiers(config.modKey)
         for action in Action.allCases {
-            guard let code = KeyCodes.keyCode(for: Self.binding(action, in: config)) else {
+            let combo = Self.combo(action, in: config)
+            guard let code = KeyCodes.keyCode(for: combo.key) else {
                 failed.append(action)
                 continue
             }
             var ref: EventHotKeyRef?
             let id = EventHotKeyID(signature: Self.signature, id: action.rawValue)
             let status = RegisterEventHotKey(
-                UInt32(code), mods, id, GetApplicationEventTarget(), 0, &ref)
+                UInt32(code), combo.carbonModifiers, id, GetApplicationEventTarget(),
+                OptionBits(kEventHotKeyExclusive), &ref)
             if status == noErr, let ref {
                 refs.append(ref)
             } else {
@@ -103,8 +120,20 @@ final class Hotkeys {
         }
     }
 
+    /// Apply new bindings now, or on `resume()` if currently suspended.
+    func update(_ config: AppConfig) {
+        if isSuspended {
+            lastConfig = config
+        } else {
+            register(config)
+        }
+    }
+
     /// Temporarily release all hotkeys (used while capturing a new keybind).
-    func suspend() { unregisterAll() }
+    func suspend() {
+        unregisterAll()
+        isSuspended = true
+    }
 
     func resume() {
         if let config = lastConfig { register(config) }

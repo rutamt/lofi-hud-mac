@@ -101,3 +101,83 @@ enum KeyCodes {
         return s
     }
 }
+
+/// A modifier set plus key, stored as e.g. "option+shift+q".
+struct KeyCombo: Hashable {
+    struct Modifiers: OptionSet, Hashable {
+        let rawValue: Int
+        static let control = Modifiers(rawValue: 1 << 0)
+        static let option = Modifiers(rawValue: 1 << 1)
+        static let shift = Modifiers(rawValue: 1 << 2)
+        static let command = Modifiers(rawValue: 1 << 3)
+
+        /// Display order matches macOS menus: ⌃ ⌥ ⇧ ⌘.
+        static let ordered: [(Modifiers, name: String, symbol: String)] = [
+            (.control, "ctrl", "⌃"), (.option, "option", "⌥"), (.shift, "shift", "⇧"), (.command, "cmd", "⌘"),
+        ]
+
+        init(rawValue: Int) { self.rawValue = rawValue }
+
+        init?(name: String) {
+            switch name.lowercased() {
+            case "ctrl", "control": self = .control
+            case "option", "alt", "opt": self = .option
+            case "shift": self = .shift
+            case "cmd", "command": self = .command
+            default: return nil
+            }
+        }
+    }
+
+    var modifiers: Modifiers
+    var key: String
+
+    /// Parse a stored binding. A bare key ("q") uses the legacy global `defaultModifier`.
+    init(_ string: String, defaultModifier: String = "option") {
+        var mods: Modifiers = []
+        var key = ""
+        for part in string.lowercased().split(separator: "+", omittingEmptySubsequences: false) {
+            if let m = Modifiers(name: String(part)) {
+                mods.insert(m)
+            } else {
+                key = String(part)
+            }
+        }
+        if mods.isEmpty, let m = Modifiers(name: defaultModifier) { mods = m }
+        self.modifiers = mods
+        self.key = key
+    }
+
+    init(modifiers: Modifiers, key: String) {
+        self.modifiers = modifiers
+        self.key = key
+    }
+
+    var stringValue: String {
+        (Modifiers.ordered.filter { modifiers.contains($0.0) }.map(\.name) + [key]).joined(separator: "+")
+    }
+
+    var modifierSymbols: [String] { Modifiers.ordered.filter { modifiers.contains($0.0) }.map(\.symbol) }
+    var display: String { modifierSymbols.joined() + KeyCodes.display(key) }
+
+    var carbonModifiers: UInt32 {
+        var m: UInt32 = 0
+        if modifiers.contains(.command) { m |= UInt32(cmdKey) }
+        if modifiers.contains(.option) { m |= UInt32(optionKey) }
+        if modifiers.contains(.control) { m |= UInt32(controlKey) }
+        if modifiers.contains(.shift) { m |= UInt32(shiftKey) }
+        return m
+    }
+
+    /// Combos that clobber common app or system shortcuts.
+    var isCommonShortcut: Bool {
+        let k = key.lowercased()
+        if modifiers == .command {
+            return ["q", "w", "c", "v", "x", "z", "a", "s", "tab", "space", "h", "m", "n", "o", "p", "f", "t"].contains(k)
+        }
+        if modifiers == [.command, .shift] { return ["3", "4", "5", "z"].contains(k) }
+        if modifiers == .control { return ["space", "up", "down", "left", "right"].contains(k) }
+        if modifiers == [.command, .option] { return ["escape", "d"].contains(k) }
+        return false
+    }
+}

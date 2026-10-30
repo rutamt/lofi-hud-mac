@@ -69,7 +69,7 @@ enum Uninstaller {
         ]
         let target = URL(fileURLWithPath: musicDir).standardizedFileURL.path.lowercased()
         if dangerous.contains(target) {
-            for url in Player.scan(musicDir) { try? fm.removeItem(at: url) }
+            for url in Library.scan(musicDir) { try? fm.removeItem(at: url) }
         } else {
             try? fm.removeItem(atPath: musicDir)
         }

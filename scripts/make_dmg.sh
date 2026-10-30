@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-2.0.0}"
+VERSION="${VERSION:-2.1.0}"
 APP="build/LoFi HUD.app"
 DMG="build/LoFiHUD_v${VERSION}.dmg"
 [[ -d "$APP" ]] || VERSION="$VERSION" scripts/build.sh
